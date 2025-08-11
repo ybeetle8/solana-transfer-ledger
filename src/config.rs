@@ -8,6 +8,7 @@ pub struct Config {
     pub grpc: GrpcConfig,
     pub monitor: MonitorConfig,
     pub database: DatabaseConfig,
+    pub api: ApiConfig,
 }
 
 /// gRPC 配置
@@ -33,6 +34,17 @@ pub struct DatabaseConfig {
     pub db_path: String,
     pub key_prefix_length: usize,
     pub signature_key_prefix: String,
+    pub address_key_prefix: String,
+    pub max_address_records: usize,
+}
+
+/// API 服务器配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApiConfig {
+    pub host: String,
+    pub port: u16,
+    pub enable_cors: bool,
+    pub log_level: String,
 }
 
 impl Config {

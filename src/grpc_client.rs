@@ -12,11 +12,14 @@ use yellowstone_grpc_proto::prelude::{
 use crate::config::{GrpcConfig, MonitorConfig};
 use crate::transfer_parser::TransferParser;
 use crate::address_extractor::AddressExtractor;
+use crate::database::{DatabaseManager, SignatureTransactionData, ExtractedAddresses};
+use crate::database::signature_storage::{SolTransfer, TokenTransfer};
 
 /// Solana gRPC 客户端
 pub struct SolanaGrpcClient {
     grpc_config: GrpcConfig,
     monitor_config: MonitorConfig,
+    db_manager: Option<DatabaseManager>,
 }
 
 impl SolanaGrpcClient {
@@ -25,6 +28,16 @@ impl SolanaGrpcClient {
         Self {
             grpc_config,
             monitor_config,
+            db_manager: None,
+        }
+    }
+
+    /// 创建带数据库管理器的 gRPC 客户端
+    pub fn with_database(grpc_config: GrpcConfig, monitor_config: MonitorConfig, db_manager: DatabaseManager) -> Self {
+        Self {
+            grpc_config,
+            monitor_config,
+            db_manager: Some(db_manager),
         }
     }
 
@@ -152,6 +165,13 @@ impl SolanaGrpcClient {
                 
                 // 提取并打印所有相关地址
                 self.extract_and_print_addresses(&transaction_update);
+
+                // 如果有数据库管理器，存储交易数据
+                if let Some(ref db_manager) = self.db_manager {
+                    if let Err(e) = self.store_transaction_to_database(db_manager, &transaction_update, timestamp as i64).await {
+                        error!("❌ 存储交易数据到数据库失败: {}", e);
+                    }
+                }
             }
             Some(UpdateOneof::Account(account_update)) => {
                 self.print_account_info(&account_update);
@@ -298,24 +318,22 @@ impl SolanaGrpcClient {
         }
     }
 
-    /// 解析并打印SOL转账信息
+    /// 解析并打印转账信息
     fn parse_and_print_transfers(&self, transaction_update: &yellowstone_grpc_proto::prelude::SubscribeUpdateTransaction, timestamp: u32) {
         // 解析SOL转账
         match TransferParser::parse_sol_transfers(transaction_update, timestamp) {
-            Ok(transfers) => {
-                if !transfers.is_empty() {
-                    TransferParser::print_transfers(&transfers);
+            Ok(sol_transfers) => {
+                if !sol_transfers.is_empty() {
+                    TransferParser::print_transfers(&sol_transfers);
                     
                     // // 统计信息
-                    // let total_amount = TransferParser::get_total_transfer_amount(&transfers);
-                    // if total_amount > 0 {
-                    //     let total_sol = total_amount as f64 / 1_000_000_000.0;
-                    //     info!("   📊 SOL总转账金额: {} lamports ({:.9} SOL)", total_amount, total_sol);
-                    // }
+                    // let total_amount = TransferParser::get_total_transfer_amount(&sol_transfers);
+                    // let sol_amount = total_amount as f64 / 1_000_000_000.0;
+                    // info!("   📊 SOL转账总金额: {:.6} SOL ({} lamports)", sol_amount, total_amount);
                     
-                    // // 标记大额转账
-                    // if TransferParser::has_large_transfer(&transfers, 10.0) {
-                    //     info!("   🚨 检测到大额SOL转账（>10 SOL）！");
+                    // // 检查是否有大额转账
+                    // if TransferParser::has_large_transfer(&sol_transfers, 10.0) {
+                    //     info!("   🔥 包含10+ SOL的大额转账！");
                     // }
                 }
             }
@@ -366,5 +384,134 @@ impl SolanaGrpcClient {
                 warn!("提取地址时出错: {}", e);
             }
         }
+    }
+
+    /// 将交易数据存储到数据库
+    async fn store_transaction_to_database(
+        &self,
+        db_manager: &DatabaseManager,
+        transaction_update: &yellowstone_grpc_proto::prelude::SubscribeUpdateTransaction,
+        timestamp: i64,
+    ) -> Result<()> {
+        let transaction = match &transaction_update.transaction {
+            Some(tx) => tx,
+            None => {
+                warn!("交易数据为空，跳过存储");
+                return Ok(());
+            }
+        };
+
+        // 获取交易签名
+        let signature = bs58::encode(&transaction.signature).into_string();
+
+        // 检查是否已存在
+        if let Ok(exists) = db_manager.signature_storage().signature_exists(&signature) {
+            if exists {
+                // 交易已存在，跳过
+                return Ok(());
+            }
+        }
+
+        // 创建签名交易数据
+        let mut signature_data = SignatureTransactionData::new(
+            signature.clone(),
+            timestamp,
+            transaction_update.slot,
+            transaction_update.transaction.as_ref()
+                .and_then(|tx| tx.meta.as_ref())
+                .map(|meta| meta.err.is_none())
+                .unwrap_or(false),
+        );
+
+        // 解析 SOL 转账
+        if let Ok(sol_transfers) = TransferParser::parse_sol_transfers(transaction_update, timestamp as u32) {
+            for transfer in sol_transfers {
+                signature_data.add_sol_transfer(SolTransfer {
+                    from: transfer.from,
+                    to: transfer.to,
+                    amount: transfer.amount,
+                    transfer_type: "SOL Transfer".to_string(),
+                });
+            }
+        }
+
+        // 解析代币转账
+        let mut parsed_token_transfers = Vec::new();
+        if let Ok(token_transfers) = TransferParser::parse_token_transfers(transaction_update, timestamp as u32) {
+            for transfer in token_transfers {
+                let token_transfer = TokenTransfer {
+                    from: transfer.from.clone(),
+                    to: transfer.to.clone(),
+                    amount: transfer.amount,
+                    decimals: transfer.decimals as u8,
+                    mint: transfer.mint.clone(),
+                    program_id: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+                    transfer_type: "Token Transfer".to_string(),
+                };
+                signature_data.add_token_transfer(token_transfer.clone());
+                
+                // 为地址存储创建带有完整字段的transfer_parser::TokenTransfer
+                let parser_token_transfer = crate::transfer_parser::TokenTransfer {
+                    signature: signature.clone(),
+                    from: transfer.from,
+                    to: transfer.to,
+                    amount: transfer.amount,
+                    mint: transfer.mint,
+                    decimals: transfer.decimals,
+                    timestamp: timestamp as u32,
+                    program_id: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+                    transfer_type: "Token Transfer".to_string(),
+                };
+                parsed_token_transfers.push(parser_token_transfer);
+            }
+        }
+
+        // 提取地址信息
+        if let Ok(addresses) = AddressExtractor::extract_all_addresses(transaction_update) {
+            let extracted_addresses = ExtractedAddresses {
+                all_addresses: addresses,
+            };
+            signature_data.set_extracted_addresses(extracted_addresses);
+        }
+
+        // 存储到签名数据库
+        match db_manager.signature_storage().store_signature_data(&signature, &signature_data) {
+            Ok(_) => {
+                info!("💾 成功存储交易 {} 到签名数据库", &signature[..8]);
+            }
+            Err(e) => {
+                error!("❌ 存储交易 {} 到签名数据库失败: {}", &signature[..8], e);
+                return Err(e);
+            }
+        }
+
+        // 同时存储到地址数据库
+        let parsed_sol_transfers: Vec<crate::transfer_parser::SolTransfer> = signature_data.sol_transfers.iter().map(|st| {
+            crate::transfer_parser::SolTransfer {
+                signature: signature.clone(),
+                from: st.from.clone(),
+                to: st.to.clone(),
+                from_index: 0, // 这些字段在地址存储中不使用
+                to_index: 0,
+                amount: st.amount,
+                timestamp: timestamp as u32,
+                transfer_type: st.transfer_type.clone(),
+            }
+        }).collect();
+
+        if let Err(e) = db_manager.address_storage().batch_process_transaction(
+            &signature,
+            timestamp as u64,
+            transaction_update.slot,
+            &parsed_sol_transfers,
+            &parsed_token_transfers,
+        ) {
+            error!("❌ 存储交易 {} 到地址数据库失败: {}", &signature[..8], e);
+            // 不返回错误，因为主要存储已成功
+        } else {
+            info!("🏠 成功存储交易 {} 到地址数据库", &signature[..8]);
+        }
+
+        Ok(())
     }
 } 

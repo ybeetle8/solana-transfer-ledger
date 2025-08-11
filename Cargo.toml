@@ -31,5 +31,18 @@ toml = "0.8"
 bs58 = "0.5"
 chrono = { version = "0.4.41", features = ["serde"] }
 rocksdb = "0.21"
+# Web API dependencies
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+utoipa = { version = "4.0", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 
 
+[profile.dev]
+opt-level = 1           # 轻量优化
+debug = 1               # 减少调试信息
+incremental = true      # 增量编译
+codegen-units = 512     # 增加并行度
+panic = "unwind"

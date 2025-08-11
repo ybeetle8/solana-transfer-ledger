@@ -1,26 +1,79 @@
-# Solana gRPC 配置
+# Solana Transfer Ledger 配置文件 / Solana Transfer Ledger Configuration File
+
+# Solana gRPC 配置 / Solana gRPC Configuration
 [grpc]
-# Solana gRPC 端点 URL
+# Solana gRPC 端点 URL / Solana gRPC endpoint URL
+# 用于连接 Solana 区块链数据流 / Used to connect to Solana blockchain data stream
 endpoint = "https://solana-yellowstone-grpc.publicnode.com:443"
-# 连接超时时间（秒）
+
+# 连接超时时间（秒）/ Connection timeout in seconds
+# 等待服务器响应的最长时间 / Maximum time to wait for server response
 timeout = 30
-# 建立连接超时时间（秒）
+
+# 建立连接超时时间（秒）/ Connection establishment timeout in seconds  
+# 建立初始连接的最长时间 / Maximum time to establish initial connection
 connect_timeout = 10
 
-# 监控配置
+# 监控配置 / Monitoring Configuration
 [monitor]
-# 是否包含失败的交易
+# 是否包含失败的交易 / Whether to include failed transactions
+# true: 监控所有交易（包括失败的）/ Monitor all transactions (including failed ones)
+# false: 只监控成功的交易 / Only monitor successful transactions
 include_failed_transactions = false
-# 是否包含投票交易
+
+# 是否包含投票交易 / Whether to include vote transactions  
+# true: 包含验证者投票交易（数据量大）/ Include validator vote transactions (high volume)
+# false: 排除投票交易（推荐，减少数据噪音）/ Exclude vote transactions (recommended, reduces data noise)
 include_vote_transactions = false
-# 要排除的程序ID列表(应该是要留空的)
+
+# 要排除的程序ID列表 / List of program IDs to exclude
+# 可以添加特定程序ID来过滤交易 / Can add specific program IDs to filter transactions
+# 示例 / Example: ["11111111111111111111111111111111", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
 exclude_programs = []
 
-# 数据库配置
+# 数据库配置 / Database Configuration
 [database]
-# RocksDB 数据库文件路径
+# RocksDB 数据库文件路径 / RocksDB database file path
+# 存储交易数据的本地目录 / Local directory to store transaction data
 db_path = "data/rocksdb"
-# 键值前缀长度（统一使用6位）
+
+# 键值前缀长度（统一使用6位）/ Key prefix length (unified 6 characters)
+# 用于分类不同类型的数据 / Used to categorize different types of data
 key_prefix_length = 6
-# 签名查询键前缀
-signature_key_prefix = "SIG001" 
+
+# 签名查询键前缀 / Signature query key prefix
+# 交易签名数据的键前缀 / Key prefix for transaction signature data
+signature_key_prefix = "SIG001"
+
+# 地址查询键前缀 / Address query key prefix  
+# 地址交易记录的键前缀 / Key prefix for address transaction records
+address_key_prefix = "ADDR01"
+
+# 每个地址保存的最大交易记录数 / Maximum transaction records per address
+# 超出此数量会删除最老的记录 / Older records will be deleted when exceeding this limit
+max_address_records = 300
+
+# API 服务器配置 / API Server Configuration
+[api]
+# 服务器监听地址 / Server listening address
+# 0.0.0.0: 监听所有网络接口 / Listen on all network interfaces
+# 127.0.0.1: 只监听本地回环接口 / Only listen on local loopback interface
+host = "0.0.0.0"
+
+# 服务器监听端口 / Server listening port
+# API 服务器对外提供服务的端口号 / Port number for API server to provide services
+port = 7777
+
+# 启用 CORS (跨域资源共享) / Enable CORS (Cross-Origin Resource Sharing)
+# true: 允许浏览器从其他域名访问此 API / Allow browsers to access this API from other domains
+# false: 只允许同域名访问，更安全但限制更多 / Only allow same-domain access, more secure but more restrictive
+# 开发环境建议 true，生产环境根据需要设置 / Recommended true for development, set as needed for production
+enable_cors = true
+
+# 日志级别 / Log level
+# trace: 最详细的日志 / Most detailed logging
+# debug: 调试信息 / Debug information  
+# info: 一般信息（推荐）/ General information (recommended)
+# warn: 警告信息 / Warning information
+# error: 只记录错误 / Only log errors
+log_level = "info" 

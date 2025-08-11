@@ -7,6 +7,7 @@ use tracing::{info, debug};
 
 /// RocksDB 存储管理器
 #[derive(Clone)]
+#[derive(Debug)]
 pub struct StorageManager {
     db: Arc<DB>,
     key_prefix_length: usize,
@@ -223,6 +224,34 @@ impl StorageManager {
             .context("获取数据库统计信息失败")?
             .unwrap_or_else(|| "无统计信息".to_string());
         Ok(stats)
+    }
+
+    /// 获取压缩相关统计信息
+    pub fn get_compaction_stats(&self) -> Result<String> {
+        let mut stats_info = String::new();
+        
+        // 获取各种压缩相关统计
+        if let Ok(Some(compaction_pending)) = self.db.property_value("rocksdb.compaction-pending") {
+            stats_info.push_str(&format!("压缩等待中: {}\n", compaction_pending));
+        }
+        
+        if let Ok(Some(num_running_compactions)) = self.db.property_value("rocksdb.num-running-compactions") {
+            stats_info.push_str(&format!("运行中的压缩: {}\n", num_running_compactions));
+        }
+        
+        if let Ok(Some(level0_files)) = self.db.property_value("rocksdb.num-files-at-level0") {
+            stats_info.push_str(&format!("Level 0 文件数: {}\n", level0_files));
+        }
+        
+        if let Ok(Some(total_sst_files)) = self.db.property_value("rocksdb.total-sst-files-size") {
+            stats_info.push_str(&format!("SST 文件总大小: {} bytes\n", total_sst_files));
+        }
+        
+        if let Ok(Some(live_sst_files)) = self.db.property_value("rocksdb.live-sst-files-size") {
+            stats_info.push_str(&format!("活跃 SST 文件大小: {} bytes\n", live_sst_files));
+        }
+        
+        Ok(stats_info)
     }
 
     /// 压缩数据库

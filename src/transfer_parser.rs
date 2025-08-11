@@ -10,7 +10,7 @@ use yellowstone_grpc_proto::solana::storage::confirmed_block::TokenBalance;
 const SHOW_DEBUG_INFO: bool = false;
 
 /// SOL转账记录
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SolTransfer {
     /// 交易签名
     pub signature: String,
@@ -26,10 +26,12 @@ pub struct SolTransfer {
     pub to_index: usize,
     /// 交易时间戳（秒级）
     pub timestamp: u32,
+    /// 转账类型（如：系统转账、质押等）
+    pub transfer_type: String,
 }
 
 /// 代币转账记录
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TokenTransfer {
     /// 交易签名
     pub signature: String,
@@ -45,6 +47,10 @@ pub struct TokenTransfer {
     pub decimals: u32,
     /// 交易时间戳（秒级）
     pub timestamp: u32,
+    /// 代币程序ID
+    pub program_id: String,
+    /// 转账类型
+    pub transfer_type: String,
 }
 
 /// 账户余额变化信息
@@ -454,7 +460,7 @@ impl TransferParser {
         for (j, receiver) in receivers.iter().enumerate() {
             if !used_receivers[j] && receiver.change > 1_000_000 { // 超过0.001 SOL
                 // 寻找任意一个未完全使用的发送方
-                if let Some((i, sender)) = senders.iter().enumerate()
+                if let Some((_i, sender)) = senders.iter().enumerate()
                     .find(|(i, s)| !used_senders[*i] && (-s.change) as u64 > 100_000) {
                     
                     transfers.push(SolTransfer {
@@ -566,7 +572,12 @@ impl TransferParser {
                         
                         if let (Ok(pre_raw), Ok(post_raw)) = (pre_raw, post_raw) {
                             if pre_raw != post_raw {
-                                let change = post_raw as i64 - pre_raw as i64;
+                                // 使用安全的减法避免溢出
+                                let change = if post_raw >= pre_raw {
+                                    (post_raw - pre_raw) as i64
+                                } else {
+                                    -((pre_raw - post_raw) as i64)
+                                };
                                 
                                 // 记录所有变化（不管正负）
                                 if change != 0 {
@@ -701,7 +712,7 @@ impl TransferParser {
                         }
                     }
                     
-                    if let Some((decrease_idx, from_index, from_amount)) = best_match {
+                    if let Some((decrease_idx, from_index, _from_amount)) = best_match {
                         used_decreases[decrease_idx] = true;
                         
                         let from_address = account_addresses
