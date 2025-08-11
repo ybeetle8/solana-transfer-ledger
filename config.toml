@@ -1,0 +1,17 @@
+# Solana gRPC 配置
+[grpc]
+# Solana gRPC 端点 URL
+endpoint = "https://solana-yellowstone-grpc.publicnode.com:443"
+# 连接超时时间（秒）
+timeout = 30
+# 建立连接超时时间（秒）
+connect_timeout = 10
+
+# 监控配置
+[monitor]
+# 是否包含失败的交易
+include_failed_transactions = false
+# 是否包含投票交易
+include_vote_transactions = false
+# 要排除的程序ID列表(应该是要留空的)
+exclude_programs = [] 
