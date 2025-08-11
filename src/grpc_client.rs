@@ -11,6 +11,7 @@ use yellowstone_grpc_proto::prelude::{
 
 use crate::config::{GrpcConfig, MonitorConfig};
 use crate::transfer_parser::TransferParser;
+use crate::address_extractor::AddressExtractor;
 
 /// Solana gRPC 客户端
 pub struct SolanaGrpcClient {
@@ -142,6 +143,9 @@ impl SolanaGrpcClient {
                 
                 // 解析SOL转账
                 self.parse_and_print_transfers(&transaction_update);
+                
+                // 提取并打印所有相关地址
+                self.extract_and_print_addresses(&transaction_update);
             }
             Some(UpdateOneof::Account(account_update)) => {
                 self.print_account_info(&account_update);
@@ -336,6 +340,24 @@ impl SolanaGrpcClient {
             }
             Err(e) => {
                 warn!("解析代币转账时出错: {}", e);
+            }
+        }
+    }
+
+    /// 提取并打印交易中的所有相关地址
+    fn extract_and_print_addresses(&self, transaction_update: &yellowstone_grpc_proto::prelude::SubscribeUpdateTransaction) {
+        match AddressExtractor::extract_all_addresses(transaction_update) {
+            Ok(addresses) => {
+                if !addresses.is_empty() {
+                    info!("🔍 交易地址列表 ({} 个):", addresses.len());
+                    for (i, address) in addresses.iter().enumerate() {
+                        info!("   {}. {}", i + 1, address);
+                    }
+                    println!(); // 空行分隔不同交易
+                }
+            }
+            Err(e) => {
+                warn!("提取地址时出错: {}", e);
             }
         }
     }

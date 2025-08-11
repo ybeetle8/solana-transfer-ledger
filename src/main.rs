@@ -1,6 +1,7 @@
 mod config;
 mod grpc_client;
 mod transfer_parser;
+mod address_extractor;
 
 use anyhow::Result;
 use tracing::{error, info};
