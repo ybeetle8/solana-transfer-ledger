@@ -7,6 +7,7 @@ use std::fs;
 pub struct Config {
     pub grpc: GrpcConfig,
     pub monitor: MonitorConfig,
+    pub database: DatabaseConfig,
 }
 
 /// gRPC 配置
@@ -24,6 +25,14 @@ pub struct MonitorConfig {
     pub include_vote_transactions: bool,
     #[allow(dead_code)]
     pub exclude_programs: Vec<String>,
+}
+
+/// 数据库配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub db_path: String,
+    pub key_prefix_length: usize,
+    pub signature_key_prefix: String,
 }
 
 impl Config {
