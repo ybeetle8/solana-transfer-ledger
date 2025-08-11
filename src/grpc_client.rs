@@ -141,8 +141,14 @@ impl SolanaGrpcClient {
                 *transaction_count += 1;
                 self.print_transaction_info(&transaction_update, *transaction_count);
                 
+                // 获取时间戳
+                let timestamp = update.created_at
+                    .as_ref()
+                    .map(|ts| ts.seconds as u32)
+                    .unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as u32);
+                    
                 // 解析SOL转账
-                self.parse_and_print_transfers(&transaction_update);
+                self.parse_and_print_transfers(&transaction_update, timestamp);
                 
                 // 提取并打印所有相关地址
                 self.extract_and_print_addresses(&transaction_update);
@@ -293,9 +299,9 @@ impl SolanaGrpcClient {
     }
 
     /// 解析并打印SOL转账信息
-    fn parse_and_print_transfers(&self, transaction_update: &yellowstone_grpc_proto::prelude::SubscribeUpdateTransaction) {
+    fn parse_and_print_transfers(&self, transaction_update: &yellowstone_grpc_proto::prelude::SubscribeUpdateTransaction, timestamp: u32) {
         // 解析SOL转账
-        match TransferParser::parse_sol_transfers(transaction_update) {
+        match TransferParser::parse_sol_transfers(transaction_update, timestamp) {
             Ok(transfers) => {
                 if !transfers.is_empty() {
                     TransferParser::print_transfers(&transfers);
@@ -319,7 +325,7 @@ impl SolanaGrpcClient {
         }
 
         // 解析代币转账
-        match TransferParser::parse_token_transfers(transaction_update) {
+        match TransferParser::parse_token_transfers(transaction_update, timestamp) {
             Ok(token_transfers) => {
                 if !token_transfers.is_empty() {
                     TransferParser::print_token_transfers(&token_transfers);

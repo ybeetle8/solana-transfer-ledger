@@ -24,6 +24,8 @@ pub struct SolTransfer {
     pub from_index: usize,
     /// 接收方账户索引
     pub to_index: usize,
+    /// 交易时间戳（秒级）
+    pub timestamp: u32,
 }
 
 /// 代币转账记录
@@ -41,10 +43,8 @@ pub struct TokenTransfer {
     pub mint: String,
     /// 代币小数位数
     pub decimals: u32,
-    /// 转出方账户索引
-    pub from_index: usize,
-    /// 接收方账户索引
-    pub to_index: usize,
+    /// 交易时间戳（秒级）
+    pub timestamp: u32,
 }
 
 /// 账户余额变化信息
@@ -70,10 +70,11 @@ impl TransferParser {
     /// 
     /// # 参数
     /// - `transaction_update`: 交易更新数据
+    /// - `timestamp`: 交易时间戳（秒级）
     /// 
     /// # 返回
     /// 返回解析出的所有SOL转账记录
-    pub fn parse_sol_transfers(transaction_update: &SubscribeUpdateTransaction) -> Result<Vec<SolTransfer>> {
+    pub fn parse_sol_transfers(transaction_update: &SubscribeUpdateTransaction, timestamp: u32) -> Result<Vec<SolTransfer>> {
         let Some(tx_info) = &transaction_update.transaction else {
             debug!("交易信息为空，跳过解析");
             return Ok(vec![]);
@@ -101,7 +102,7 @@ impl TransferParser {
         let balance_changes = Self::analyze_balance_changes(&account_addresses, meta)?;
         
         // 解析转账
-        let transfers = Self::extract_transfers(&balance_changes, &tx_info.signature)?;
+        let transfers = Self::extract_transfers(&balance_changes, &tx_info.signature, timestamp)?;
         
         Ok(transfers)
     }
@@ -110,10 +111,11 @@ impl TransferParser {
     /// 
     /// # 参数
     /// - `transaction_update`: 交易更新数据
+    /// - `timestamp`: 交易时间戳（秒级）
     /// 
     /// # 返回
     /// 返回解析出的所有代币转账记录
-    pub fn parse_token_transfers(transaction_update: &SubscribeUpdateTransaction) -> Result<Vec<TokenTransfer>> {
+    pub fn parse_token_transfers(transaction_update: &SubscribeUpdateTransaction, timestamp: u32) -> Result<Vec<TokenTransfer>> {
         let Some(tx_info) = &transaction_update.transaction else {
             debug!("交易信息为空，跳过代币转账解析");
             return Ok(vec![]);
@@ -154,7 +156,8 @@ impl TransferParser {
             &account_addresses, 
             &meta.pre_token_balances, 
             &meta.post_token_balances, 
-            &tx_info.signature
+            &tx_info.signature,
+            timestamp
         )?;
         
         Ok(token_transfers)
@@ -243,6 +246,7 @@ impl TransferParser {
     fn extract_transfers(
         balance_changes: &[AccountBalanceChange],
         signature: &[u8],
+        timestamp: u32,
     ) -> Result<Vec<SolTransfer>> {
         let signature_str = bs58::encode(signature).into_string();
         let mut transfers = Vec::new();
@@ -302,6 +306,7 @@ impl TransferParser {
                         amount: receive_amount,
                         from_index: sender.index,
                         to_index: receiver.index,
+                        timestamp,
                     });
 
                     used_senders[i] = true;
@@ -358,6 +363,7 @@ impl TransferParser {
                         amount: receive_amount,
                         from_index: sender.index,
                         to_index: receiver.index,
+                        timestamp,
                     });
 
                     used_receivers[j] = true;
@@ -418,6 +424,7 @@ impl TransferParser {
                     amount: used_amount.min(remaining_needed),
                     from_index: sender.index,
                     to_index: receiver.index,
+                    timestamp,
                 });
 
                 remaining_needed = remaining_needed.saturating_sub(used_amount.min(remaining_needed));
@@ -457,6 +464,7 @@ impl TransferParser {
                         amount: receiver.change as u64,
                         from_index: sender.index,
                         to_index: receiver.index,
+                        timestamp,
                     });
 
                     if SHOW_DEBUG_INFO {
@@ -507,6 +515,7 @@ impl TransferParser {
         pre_token_balances: &[TokenBalance],
         post_token_balances: &[TokenBalance],
         signature: &[u8],
+        timestamp: u32,
     ) -> Result<Vec<TokenTransfer>> {
         let signature_str = bs58::encode(signature).into_string();
         let mut transfers = Vec::new();
@@ -652,8 +661,7 @@ impl TransferParser {
                         amount: to_amount,
                         mint: mint.clone(),
                         decimals: *decimals,
-                        from_index: *from_index as usize,
-                        to_index: *to_index as usize,
+                        timestamp,
                     });
 
                     if SHOW_DEBUG_INFO {
@@ -713,8 +721,7 @@ impl TransferParser {
                             amount: to_amount,
                             mint: mint.clone(),
                             decimals: *decimals,
-                            from_index: from_index as usize,
-                            to_index: *to_index as usize,
+                            timestamp,
                         });
 
                         if SHOW_DEBUG_INFO {
@@ -749,8 +756,7 @@ impl TransferParser {
                                 amount: to_amount,
                                 mint: mint.clone(),
                                 decimals: *decimals,
-                                from_index: 0,  // 特殊标记
-                                to_index: *to_index as usize,
+                                timestamp,
                             });
                         }
                     }
@@ -781,8 +787,7 @@ impl TransferParser {
                                 amount: from_amount,
                                 mint: mint.clone(),
                                 decimals: *decimals,
-                                from_index: *from_index as usize,
-                                to_index: 0,  // 特殊标记
+                                timestamp,
                             });
                         }
                     }
@@ -805,12 +810,16 @@ impl TransferParser {
         println!("🔄 发现 {} 笔SOL转账:", transfers.len());
         for (i, transfer) in transfers.iter().enumerate() {
             let sol_amount = transfer.amount as f64 / 1_000_000_000.0;
+            let timestamp = chrono::DateTime::from_timestamp(transfer.timestamp as i64, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "未知时间".to_string());
             println!(
-                "  {}. {} -> {} : {:.9} SOL",
+                "  {}. {} -> {} : {:.9} SOL (时间: {})",
                 i + 1,
                 &transfer.from[..8],
                 &transfer.to[..8],
-                sol_amount
+                sol_amount,
+                timestamp
             );
         }
     }
@@ -838,29 +847,35 @@ impl TransferParser {
         println!("🪙 发现 {} 笔代币转账:", transfers.len());
         for (i, transfer) in transfers.iter().enumerate() {
             let token_amount = transfer.amount as f64 / 10_u64.pow(transfer.decimals) as f64;
+            let timestamp = chrono::DateTime::from_timestamp(transfer.timestamp as i64, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "未知时间".to_string());
             
             // 判断转账类型
             if transfer.from == "MINT/AIRDROP" {
                 println!(
-                    "  {}. 💰 MINT/空投 -> {} : {:.9} tokens",
+                    "  {}. 💰 MINT/空投 -> {} : {:.9} tokens (时间: {})",
                     i + 1,
                     &transfer.to[..8],
-                    token_amount
+                    token_amount,
+                    timestamp
                 );
             } else if transfer.to == "BURN/DESTROY" {
                 println!(
-                    "  {}. 🔥 {} -> BURN/销毁 : {:.9} tokens",
+                    "  {}. 🔥 {} -> BURN/销毁 : {:.9} tokens (时间: {})",
                     i + 1,
                     &transfer.from[..8],
-                    token_amount
+                    token_amount,
+                    timestamp
                 );
             } else {
                 println!(
-                    "  {}. {} -> {} : {:.9} tokens",
+                    "  {}. {} -> {} : {:.9} tokens (时间: {})",
                     i + 1,
                     &transfer.from[..8],
                     &transfer.to[..8],
-                    token_amount
+                    token_amount,
+                    timestamp
                 );
             }
         }
@@ -911,6 +926,7 @@ mod tests {
             amount: 1_500_000_000, // 1.5 SOL in lamports
             from_index: 0,
             to_index: 1,
+            timestamp: 1640995200, // 2022-01-01 00:00:00 UTC
         };
 
         println!("{:?}", transfer);
